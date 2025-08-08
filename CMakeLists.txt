@@ -65,11 +65,7 @@ target_link_libraries(
     score_lib_base score_plugin_engine score_plugin_media
 
   PRIVATE
-    ${QT_PREFIX}::Xml
     awdoc_resources
-
-    $<BUILD_INTERFACE:dspfilters>
-    $<BUILD_INTERFACE:gamma>
 )
 
 setup_score_plugin(${PROJECT_NAME})
