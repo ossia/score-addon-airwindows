@@ -1,3 +1,9 @@
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
+
+if(NOT TARGET score_lib_base)
+  include(ScoreExternalAddon)
+endif()
+
 project(score_addon_airwindows LANGUAGES CXX)
 
 if(NOT TARGET score_plugin_engine)
