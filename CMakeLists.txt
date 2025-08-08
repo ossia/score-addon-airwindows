@@ -1,0 +1,69 @@
+project(score_addon_airwindows LANGUAGES CXX)
+
+if(NOT TARGET score_plugin_engine)
+  return()
+endif()
+
+score_common_setup()
+
+file(GLOB airwindows_srcs  
+  "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/autogen_airwin/*.cpp"
+)
+# Files & main target
+set(HDRS
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/Executor/Component.hpp"
+
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/Library.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/ProcessFactory.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/ProcessMetadata.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/ProcessModel.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/score_addon_airwindows.hpp"
+)
+set(SRCS
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/ProcessModel.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/ProcessModelSerialization.cpp"
+
+  "${CMAKE_CURRENT_SOURCE_DIR}/Airwindows/Executor/Component.cpp"
+  
+  ${airwindows_srcs}
+
+  "${CMAKE_CURRENT_SOURCE_DIR}/score_addon_airwindows.cpp"
+)
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/cmake/CmakeRC.cmake)
+cmrc_add_resource_library(awdoc_resources ALIAS awdoc::rc NAMESPACE awdoc_resources)
+file(GLOB DOC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/*.txt")
+cmrc_add_resources(awdoc_resources
+    WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack"
+    ${DOC_FILES}
+)
+
+add_library(${PROJECT_NAME} ${SRCS} ${HDRS})
+
+if(NOT MSVC)
+target_compile_options(${PROJECT_NAME} PRIVATE -Wno-unused)
+endif()
+
+target_include_directories(${PROJECT_NAME} 
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/autogen_airwin"
+)
+
+score_generate_command_list_file(${PROJECT_NAME} "${HDRS}")
+
+target_link_libraries(
+  ${PROJECT_NAME}
+  PUBLIC
+    score_lib_base score_plugin_engine score_plugin_media
+
+  PRIVATE
+    ${QT_PREFIX}::Xml
+    awdoc_resources
+
+    $<BUILD_INTERFACE:dspfilters>
+    $<BUILD_INTERFACE:gamma>
+)
+
+setup_score_plugin(${PROJECT_NAME})

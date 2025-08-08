@@ -1,0 +1,3 @@
+[submodule "3rdparty/3rdparty/airwin2rack"]
+	path = 3rdparty/airwin2rack
+	url = https://github.com/baconpaul/airwin2rack
