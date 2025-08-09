@@ -46,6 +46,10 @@ cmrc_add_resources(awdoc_resources
 )
 
 add_library(${PROJECT_NAME} ${SRCS} ${HDRS})
+set_target_properties(${PROJECT_NAME} 
+  PROPERTIES 
+    UNITY_BUILD OFF
+)
 
 if(NOT MSVC)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wno-unused)
