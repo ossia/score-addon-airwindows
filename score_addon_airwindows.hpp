@@ -13,7 +13,7 @@ class score_addon_airwindows final
     : public score::Plugin_QtInterface
     , public score::FactoryInterface_QtInterface
 {
-  SCORE_PLUGIN_METADATA(1, "dddc3f7e-a879-4c86-b180-d90b7d456356")
+  SCORE_PLUGIN_METADATA(1, "7fa5a700-e5d0-4a00-bc57-01e2fe031202")
 public:
   score_addon_airwindows();
   virtual ~score_addon_airwindows();
