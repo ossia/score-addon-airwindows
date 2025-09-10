@@ -3,15 +3,16 @@
 
 #include "ProcessModel.hpp"
 
-#include <Process/Dataflow/Port.hpp>
-
 #include <Process/Dataflow/ControlWidgets.hpp>
-#include <Airwindows/Library.hpp>
-#include <Airwindows/ProcessMetadata.hpp>
+#include <Process/Dataflow/Port.hpp>
 
 #include <score/tools/IdentifierGeneration.hpp>
 
 #include <ossia/detail/algorithms.hpp>
+
+#include <Airwindows/Library.hpp>
+#include <Airwindows/ProcessFactory.hpp>
+#include <Airwindows/ProcessMetadata.hpp>
 
 #include <wobjectimpl.h>
 W_OBJECT_IMPL(Airwindows::ProcessModel)
@@ -19,6 +20,22 @@ W_OBJECT_IMPL(Airwindows::ProcessModel)
 namespace Airwindows
 {
 
+Process::Descriptor ProcessFactory::descriptor(QString txt) const noexcept
+{
+  Process::Descriptor d
+      = Metadata<Process::Descriptor_k, Airwindows::ProcessModel>::get();
+  auto plug_index = AirwinRegistry::nameToIndex.find(txt.toStdString());
+  if(plug_index == AirwinRegistry::nameToIndex.end())
+    return d;
+  const auto& plug = AirwinRegistry::registry[plug_index->second];
+
+  d.description = QString::fromStdString(plug.whatText);
+  for(auto& col : plug.collections)
+    d.tags.push_back(QString::fromStdString(col));
+  d.documentationLink = "https://www.airwindows.com/" + txt;
+
+  return d;
+}
 ProcessModel::ProcessModel(
     const TimeVal& duration, const QString& data, const Id<Process::ProcessModel>& id,
     QObject* parent)

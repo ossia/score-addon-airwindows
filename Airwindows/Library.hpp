@@ -14,13 +14,6 @@
 
 namespace Airwindows
 {
-
-struct AirwindowsPlugin
-{
-  std::string name;
-  std::string category;
-};
-
 inline void initializeRegistry()
 {
   static bool initialized = false;
@@ -32,15 +25,6 @@ inline void initializeRegistry()
   }
 }
 
-inline std::vector<AirwindowsPlugin> getAirwindowsPlugins()
-{
-  std::vector<AirwindowsPlugin> plugins;
-  for(const auto& reg : AirwinRegistry::registry)
-  {
-    plugins.push_back({reg.name, reg.category});
-  }
-  return plugins;
-}
 class LibraryHandler final
     : public QObject
     , public Library::LibraryInterface
@@ -48,6 +32,7 @@ class LibraryHandler final
   SCORE_CONCRETE("5aff3580-21d3-4069-bd08-823371245a5b")
 public:
   Library::ProcessNode* node{};
+  ossia::hash_map<std::string, Library::ProcessNode*> categories;
 
   void setup(Library::ProcessesItemModel& model, const score::GUIApplicationContext& ctx)
       override
@@ -63,14 +48,23 @@ public:
     // Initialize the airwindows registry
     initializeRegistry();
 
+    for(const auto& cat : AirwinRegistry::categories)
+    {
+      auto& category = Library::addToLibrary(
+          parent, Library::ProcessData{{{}, QString::fromStdString(cat), {}}, {}});
+      categories[cat] = &category;
+    }
     // Add all airwindows plugins from the registry
-    for(const auto& plugin : getAirwindowsPlugins())
+    for(const auto& plugin : AirwinRegistry::registry)
     {
       Library::ProcessData pdata{
           {key, QString::fromStdString(plugin.name),
            QString::fromStdString(plugin.name)},
           {}};
-      Library::addToLibrary(parent, std::move(pdata));
+      if(auto it = categories.find(plugin.category); it != categories.end())
+        Library::addToLibrary(*it->second, std::move(pdata));
+      else
+        Library::addToLibrary(parent, std::move(pdata));
     }
   }
 };

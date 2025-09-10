@@ -53,6 +53,32 @@ set_target_properties(${PROJECT_NAME}
 
 if(NOT MSVC)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wno-unused)
+if(NOT CMAKE_CROSSCOMPILING)
+  if(CMAKE_BUILD_TYPE MATCHES ".*Debug.*")
+    set_target_properties(${PROJECT_NAME} PROPERTIES SCORE_CUSTOM_PCH 1)
+    target_precompile_headers(${PROJECT_NAME} PRIVATE
+      <cstdint>
+      <cassert>
+      <cstring>
+      <cstdio>
+      <cmath>
+      <vector>
+      <map>
+      <set>
+      <algorithm>
+      <memory>
+      <optional>
+      <string>
+      <array>
+      <atomic>
+      <mutex>
+    )
+
+    target_compile_options(${PROJECT_NAME} PRIVATE -O3 -march=native)
+  endif()
+  target_compile_options(${PROJECT_NAME} PRIVATE -w)
+endif()
+
 endif()
 
 target_include_directories(${PROJECT_NAME} 
