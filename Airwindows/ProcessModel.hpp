@@ -21,7 +21,8 @@ class ProcessModel;
 class ProcessModel final : public Process::ProcessModel
 {
   SCORE_SERIALIZE_FRIENDS
-  PROCESS_METADATA_IMPL(Airwindows::ProcessModel)
+  MODEL_METADATA_IMPL(ProcessModel)
+
   W_OBJECT(ProcessModel)
 
   friend class DataStreamReader;
@@ -39,17 +40,28 @@ public:
       : Process::ProcessModel{vis, parent}
   {
     vis.writeTo(*this);
+    init();
   }
 
   ~ProcessModel() override;
 
   QString prettyName() const noexcept override;
+  QString prettyShortName() const noexcept override
+  {
+    return Metadata<PrettyName_k, ProcessModel>::get();
+  }
+  QString category() const noexcept override
+  {
+    return Metadata<Category_k, ProcessModel>::get();
+  }
+  QStringList tags() const noexcept override
+  {
+    return Metadata<Tags_k, ProcessModel>::get();
+  }
+  Process::ProcessFlags flags() const noexcept override;
 
   void setPluginName(const QString& name);
   const QString& pluginName() const noexcept { return m_pluginName; }
-
-  // Create the airwindows effect instance
-  std::unique_ptr<AirwinConsolidatedBase> createEffect() const;
 
   // Control management
   void on_addControl(int idx, float v);
@@ -58,8 +70,6 @@ public:
   
   // Get parameter info from the effect
   QString getParameterName(int index) const;
-  QString getParameterLabel(int index) const;
-  QString getParameterDisplay(int index) const;
   int getParameterCount() const;
 
   std::unique_ptr<Process::Inlet> audio_in;
@@ -71,8 +81,12 @@ public:
   void controlAdded(const Process::Port& p) W_SIGNAL(controlAdded, p);
   void controlRemoved(const Process::Port& p) W_SIGNAL(controlRemoved, p);
 
+  AirwinRegistry::awReg* reg{};
+  std::shared_ptr<AirwinConsolidatedBase> fx;
+
 private:
   QString m_pluginName;
+  int m_pluginIndex{-1};
   void init();
 };
 

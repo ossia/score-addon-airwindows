@@ -20,7 +20,7 @@
 
 score_addon_airwindows::score_addon_airwindows()
 {
-  AirwinRegistry::completeRegistry();
+  Airwindows::initializeRegistry();
 }
 
 score_addon_airwindows::~score_addon_airwindows() = default;

@@ -64,6 +64,18 @@ ProcessModel::ProcessModel(
   }
 }
 
+Process::ProcessFlags ProcessModel::flags() const noexcept
+{
+  auto f = Metadata<Process::ProcessFlags_k, ProcessModel>::get();
+  if(m_pluginIndex < 0 || m_pluginIndex >= AirwinRegistry::registry.size())
+    return f;
+
+  auto& r = AirwinRegistry::registry[m_pluginIndex];
+  if(r.isMono)
+    f |= Process::ProcessFlags::PolyphonySupported;
+
+  return f;
+}
 ProcessModel::~ProcessModel() { }
 
 QString ProcessModel::prettyName() const noexcept
@@ -81,30 +93,13 @@ void ProcessModel::setPluginName(const QString& name)
   }
 }
 
-std::unique_ptr<AirwinConsolidatedBase> ProcessModel::createEffect() const
-{
-  if(m_pluginName.isEmpty())
-    return {};
-
-  // Initialize registry if needed
-  initializeRegistry();
-
-  // Find the plugin in the registry
-  auto it = AirwinRegistry::nameToIndex.find(m_pluginName.toStdString());
-  if(it == AirwinRegistry::nameToIndex.end())
-    return {};
-
-  int index = it->second;
-  if(index < 0 || index >= AirwinRegistry::registry.size())
-    return {};
-
-  // Create the effect using the generator function
-  return AirwinRegistry::registry[index].generator();
-}
-
 void ProcessModel::init()
 {
-  // Basic initialization
+  if(auto it = AirwinRegistry::nameToIndex.find(m_pluginName.toStdString());
+     it != AirwinRegistry::nameToIndex.end())
+    m_pluginIndex = it->second;
+  reg = &AirwinRegistry::registry[m_pluginIndex];
+  fx.reset(reg->generator().release());
 }
 
 void ProcessModel::on_addControl(int idx, float v)
@@ -156,7 +151,6 @@ void ProcessModel::removeControl(int fxnum)
 
 QString ProcessModel::getParameterName(int index) const
 {
-  auto fx = createEffect();
   if(!fx)
     return QString("Param %1").arg(index);
     
@@ -166,46 +160,11 @@ QString ProcessModel::getParameterName(int index) const
   return result.isEmpty() ? QString("Param %1").arg(index) : result;
 }
 
-QString ProcessModel::getParameterLabel(int index) const
-{
-  auto fx = createEffect();
-  if(!fx)
-    return "";
-    
-  char label[256] = {0};
-  fx->getParameterLabel(index, label);
-  return QString::fromUtf8(label);
-}
-
-QString ProcessModel::getParameterDisplay(int index) const
-{
-  auto fx = createEffect();
-  if(!fx)
-    return "";
-    
-  char display[256] = {0};
-  fx->getParameterDisplay(index, display);
-  return QString::fromUtf8(display);
-}
-
 int ProcessModel::getParameterCount() const
 {
-  if(m_pluginName.isEmpty())
+  if(m_pluginIndex < 0 || m_pluginIndex >= AirwinRegistry::registry.size())
     return 0;
-    
-  // Initialize registry if needed
-  initializeRegistry();
-  
-  // Find the plugin in the registry
-  auto it = AirwinRegistry::nameToIndex.find(m_pluginName.toStdString());
-  if(it == AirwinRegistry::nameToIndex.end())
-    return 0;
-    
-  int index = it->second;
-  if(index < 0 || index >= AirwinRegistry::registry.size())
-    return 0;
-    
-  // Get parameter count from the registry
-  return AirwinRegistry::registry[index].nParams;
+
+  return AirwinRegistry::registry[m_pluginIndex].nParams;
 }
 }
