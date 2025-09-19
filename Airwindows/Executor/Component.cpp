@@ -210,6 +210,9 @@ public:
     double* unused_zero_buffer = (double*)alloca(sizeof(double) * e.bufferSize() + 64);
     for(int i = 0; i < poly_channels; i++)
     {
+      auto& chan = audio_in.channel(i);
+      if(chan.size() < e.bufferSize())
+        chan.resize(e.bufferSize());
       double* input = audio_in.channel(i).data() + tick_start;
       double* output = audio_out.channel(i).data() + tick_start;
 
@@ -290,6 +293,8 @@ public:
     for(auto& out : outp)
       out.resize(e.bufferSize());
 
+    for(auto& chan : inp)
+      chan.resize(std::max((int)chan.size(), e.bufferSize()));
     if(inp.channel(0).size() < e.bufferSize())
       return;
 
@@ -310,8 +315,6 @@ public:
     }
     else if(channels >= 2)
     {
-      if(inp.channel(1).size() < e.bufferSize())
-        return;
       // Stereo processing (use first 2 channels)
       double* inputs[2]
           = {inp.channel(0).data() + tick_start, inp.channel(1).data() + tick_start};
