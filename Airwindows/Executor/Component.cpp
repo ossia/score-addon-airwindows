@@ -67,6 +67,8 @@ public:
     }
   }
 
+  ~airwindows_node_polyphonic() { }
+
   auto add_control_inlet()
   {
     auto inlet = new ossia::value_inlet;
@@ -241,6 +243,8 @@ public:
     m_outlets.push_back(new ossia::audio_outlet);
   }
 
+  ~airwindows_node_stereo() { }
+
   auto add_control_inlet()
   {
     auto inlet = new ossia::value_inlet;
@@ -348,8 +352,6 @@ Component::Component(
     return;
 
   const auto sr = ctx.execState->sampleRate;
-  fx_ptr->setSampleRate(sr);
-
   const bool monophonic = proc.flags() & Process::ProcessFlags::PolyphonySupported;
 
   if(monophonic)
@@ -391,7 +393,14 @@ Component::Component(
   }
   else
   {
-    // Create the node with the effect
+    // Create the node with the effect. We recreate a new one even there because airwindows plug-in
+    // do not allow to reset their internal state, leading to e.g. delays and reverb trails surviving a
+    // stop / play sequence.
+    auto fx_ptr = proc.reg->generator();
+    if(!fx_ptr)
+      return;
+    fx_ptr->setSampleRate(sr);
+
     auto node = ossia::make_node<airwindows_node_stereo>(
         *ctx.execState, *proc.reg, std::move(fx_ptr));
     auto& fx = *node->m_fx;

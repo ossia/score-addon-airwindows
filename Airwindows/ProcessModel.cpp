@@ -112,7 +112,9 @@ void ProcessModel::on_addControl(int idx, float v)
     Id<Process::Port>(getStrongId(inlets()).val()), 
     this
   };
-  
+
+  // FIXME: use getParameterDisplay.
+  // Maybe we could display something like "0.2 (-18dB)"
   ctrl->setDomain(ossia::make_domain(0.f, 1.f));
   ctrl->setValue(v);
   
