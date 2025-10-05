@@ -74,7 +74,7 @@ if(NOT CMAKE_CROSSCOMPILING)
       <mutex>
     )
 
-    target_compile_options(${PROJECT_NAME} PRIVATE -O3 -march=native)
+    score_optimize_in_debug_mode(${PROJECT_NAME})
   endif()
   target_compile_options(${PROJECT_NAME} PRIVATE -w)
 endif()
