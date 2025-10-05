@@ -41,8 +41,10 @@ ProcessModel::ProcessModel(
     QObject* parent)
     : Process::
           ProcessModel{duration, id, Metadata<ObjectKey_k, ProcessModel>::get(), parent}
-    , audio_in{Process::make_audio_inlet(Id<Process::Port>(0), this)}
-    , audio_out{Process::make_audio_outlet(Id<Process::Port>(0), this)}
+    , audio_in{std::make_unique<Process::AudioInlet>(
+          "Audio In", Id<Process::Port>(0), this)}
+    , audio_out{std::make_unique<Process::AudioOutlet>(
+          "Audio Out", Id<Process::Port>(0), this)}
     , m_pluginName{data}
 {
   metadata().setInstanceName(*this);
