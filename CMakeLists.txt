@@ -51,6 +51,10 @@ set_target_properties(${PROJECT_NAME}
     UNITY_BUILD OFF
 )
 
+if(MSVC)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE _USE_MATH_DEFINES=1)
+endif()
+
 if(NOT MSVC)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wno-unused)
 if(NOT CMAKE_CROSSCOMPILING)
