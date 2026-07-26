@@ -100,6 +100,14 @@ void ProcessModel::init()
   if(auto it = AirwinRegistry::nameToIndex.find(m_pluginName.toStdString());
      it != AirwinRegistry::nameToIndex.end())
     m_pluginIndex = it->second;
+
+  if(m_pluginIndex < 0 || m_pluginIndex >= AirwinRegistry::registry.size())
+  {
+    reg = nullptr;
+    fx.reset();
+    return;
+  }
+
   reg = &AirwinRegistry::registry[m_pluginIndex];
   fx.reset(reg->generator().release());
 }
