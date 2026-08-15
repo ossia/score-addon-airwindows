@@ -2,15 +2,9 @@
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "Component.hpp"
 
-#include <Explorer/DocumentPlugin/DeviceDocumentPlugin.hpp>
+#include <Process/Dataflow/Port.hpp>
 
-#include <Scenario/Execution/score2OSSIA.hpp>
-
-#include <Execution/DocumentPlugin.hpp>
-
-#include <score/serialization/AnySerialization.hpp>
-#include <score/serialization/MapSerialization.hpp>
-#include <score/tools/Bind.hpp>
+#include <score/tools/SafeCast.hpp>
 
 #include <ossia/dataflow/execution_state.hpp>
 #include <ossia/detail/fmt.hpp>
@@ -18,18 +12,11 @@
 #include <ossia/dataflow/graph_edge.hpp>
 #include <ossia/dataflow/graph_edge_helpers.hpp>
 #include <ossia/dataflow/port.hpp>
-#include <ossia/detail/logger.hpp>
 #include <ossia/detail/parse_relax.hpp>
 #include <ossia/detail/ssize.hpp>
-#include <ossia/editor/scenario/time_interval.hpp>
-#include <ossia/editor/state/message.hpp>
-#include <ossia/editor/state/state.hpp>
+#include <ossia/math/safe_math.hpp>
 
-#include <QEventLoop>
-#include <QQmlComponent>
-#include <QQmlContext>
-#include <QTimer>
-
+#include <Airwindows/Metadata.hpp>
 #include <Airwindows/ProcessModel.hpp>
 
 #include <AirwinRegistry.h>
@@ -39,8 +26,59 @@ namespace Airwindows
 {
 namespace Executor
 {
+namespace
+{
+//! The element type of a polyphonic value differs per ossia::value alternative.
+struct to_double
+{
+  double operator()(float v) const noexcept { return v; }
+  double operator()(const ossia::value& v) const noexcept
+  {
+    return ossia::convert<double>(v);
+  }
+};
+}
+
+/**
+ * @brief What both node shapes share: the effect class and the parameter mapping.
+ *
+ * Control ports carry the value in display units - dB, Hz, an enumerator index - and
+ * the node normalizes it back to the [0;1] the effect actually consumes.
+ */
+class airwindows_node_base : public ossia::graph_node
+{
+public:
+  const AirwinRegistry::awReg& plugin_class;
+  const std::vector<ParameterMetadata>& params;
+
+  explicit airwindows_node_base(
+      const AirwinRegistry::awReg& c, const std::vector<ParameterMetadata>& p)
+      : plugin_class{c}
+      , params{p}
+  {
+    m_inlets.push_back(new ossia::audio_inlet);
+    m_outlets.push_back(new ossia::audio_outlet);
+  }
+
+  ossia::value_inlet* add_control_inlet()
+  {
+    auto inlet = new ossia::value_inlet;
+    m_inlets.push_back(inlet);
+    return inlet;
+  }
+
+  //! Display units -> the [0;1] the effect consumes. Total: never returns a NaN.
+  float to_normalized(int parameter_i, double display) const noexcept
+  {
+    if(parameter_i >= 0 && parameter_i < std::ssize(params))
+      return (float)params[parameter_i].toNormalized(display);
+    const bool finite = !ossia::safe_isnan(display) && !ossia::safe_isinf(display);
+    return finite ? (float)std::clamp(display, 0., 1.) : 0.f;
+  }
+};
+
 // In this one we create as many instances as we have channels.
-class airwindows_node_polyphonic final : public ossia::graph_node
+class airwindows_node_polyphonic final : public airwindows_node_base
 {
   struct poly_plugin
   {
@@ -49,17 +87,14 @@ class airwindows_node_polyphonic final : public ossia::graph_node
     const AirwinConsolidatedBase* operator->() const noexcept { return plugin.get(); }
     AirwinConsolidatedBase* operator->() noexcept { return plugin.get(); }
   };
-  const AirwinRegistry::awReg& plugin_class;
   double sample_rate{};
 
 public:
-  explicit airwindows_node_polyphonic(const AirwinRegistry::awReg& c, double sr)
-      : plugin_class{c}
+  explicit airwindows_node_polyphonic(
+      const AirwinRegistry::awReg& c, const std::vector<ParameterMetadata>& p, double sr)
+      : airwindows_node_base{c, p}
       , sample_rate{sr}
   {
-    m_inlets.push_back(new ossia::audio_inlet);
-    m_outlets.push_back(new ossia::audio_outlet);
-
     m_fxs.reserve(8);
     for(int i = 0; i < 8; i++)
     {
@@ -70,13 +105,16 @@ public:
 
   ~airwindows_node_polyphonic() { }
 
-  auto add_control_inlet()
+  //! One value per voice.
+  template <typename T, typename Conv>
+  void set_per_voice(int parameter_i, const T& v, Conv convert)
   {
-    auto inlet = new ossia::value_inlet;
-    (*inlet)->domain = ossia::domain_base<float>{0.f, 1.f};
-    (*inlet)->type = ossia::val_type::FLOAT;
-    m_inlets.push_back(inlet);
-    return inlet;
+    for(int plug_i = 0; plug_i < m_fxs.size() && plug_i < v.size(); plug_i++)
+    {
+      auto& fx = m_fxs[plug_i];
+      if(fx.plugin)
+        fx->setParameter(parameter_i, to_normalized(parameter_i, convert(v[plug_i])));
+    }
   }
 
   void apply_value(int i, const ossia::value& v)
@@ -85,73 +123,40 @@ public:
     {
       airwindows_node_polyphonic& self;
       int parameter_i;
+
+      //! All channels get the same value.
+      void set_all(double display)
+      {
+        const float norm = self.to_normalized(parameter_i, display);
+        for(auto& fx : self.m_fxs)
+          if(fx.plugin)
+            fx->setParameter(parameter_i, norm);
+      }
+
       void operator()() { }
       void operator()(ossia::impulse) { }
-      void operator()(int v)
-      {
-        for(auto& fx : self.m_fxs)
-          if(fx.plugin)
-            fx->setParameter(parameter_i, v);
-      }
-      void operator()(float v)
-      {
-        for(auto& fx : self.m_fxs)
-          if(fx.plugin)
-            fx->setParameter(parameter_i, v);
-      }
-      void operator()(bool v)
-      {
-        for(auto& fx : self.m_fxs)
-          if(fx.plugin)
-            fx->setParameter(parameter_i, v ? 1 : 0);
-      }
+      void operator()(int v) { set_all(v); }
+      void operator()(float v) { set_all(v); }
+      void operator()(bool v) { set_all(v ? 1. : 0.); }
       void operator()(const std::string& str)
       {
-        float val;
-        if(auto v = ossia::parse_relax<float>(str))
-          val = *v;
-        else
-          val = 0.f;
-
-        for(auto& fx : self.m_fxs)
-          if(fx.plugin)
-            fx->setParameter(parameter_i, val);
+        set_all(ossia::parse_relax<float>(str).value_or(0.f));
       }
       void operator()(ossia::vec2f v)
       {
-        for(int plug_i = 0; plug_i < self.m_fxs.size() && plug_i < v.size(); plug_i++)
-        {
-          auto& fx = self.m_fxs[plug_i];
-          if(fx.plugin)
-            fx->setParameter(parameter_i, v[plug_i]);
-        }
+        self.set_per_voice(parameter_i, v, to_double{});
       }
       void operator()(ossia::vec3f v)
       {
-        for(int plug_i = 0; plug_i < self.m_fxs.size() && plug_i < v.size(); plug_i++)
-        {
-          auto& fx = self.m_fxs[plug_i];
-          if(fx.plugin)
-            fx->setParameter(parameter_i, v[plug_i]);
-        }
+        self.set_per_voice(parameter_i, v, to_double{});
       }
       void operator()(ossia::vec4f v)
       {
-        for(int plug_i = 0; plug_i < self.m_fxs.size() && plug_i < v.size(); plug_i++)
-        {
-          auto& fx = self.m_fxs[plug_i];
-          if(fx.plugin)
-            fx->setParameter(parameter_i, v[plug_i]);
-        }
+        self.set_per_voice(parameter_i, v, to_double{});
       }
       void operator()(const std::vector<ossia::value>& v)
       {
-        for(int plug_i = 0; plug_i < self.m_fxs.size() && plug_i < v.size(); plug_i++)
-        {
-          auto& fx = self.m_fxs[plug_i];
-          if(fx.plugin)
-            fx->setParameter(parameter_i, ossia::convert<float>(v[plug_i]));
-        }
+        self.set_per_voice(parameter_i, v, to_double{});
       }
       void operator()(const ossia::value_map_type& v)
       {
@@ -159,7 +164,10 @@ public:
         {
           auto& fx = self.m_fxs[plug_i];
           if(fx.plugin)
-            fx->setParameter(parameter_i, ossia::convert<float>(v.at(plug_i).second));
+            fx->setParameter(
+                parameter_i,
+                self.to_normalized(
+                    parameter_i, ossia::convert<double>(v.at(plug_i).second)));
         }
       }
     } vis{*this, i};
@@ -234,29 +242,19 @@ public:
 
   std::vector<poly_plugin> m_fxs;
 };
-class airwindows_node_stereo final : public ossia::graph_node
+
+class airwindows_node_stereo final : public airwindows_node_base
 {
 public:
-  const AirwinRegistry::awReg& plugin_class;
   explicit airwindows_node_stereo(
-      const AirwinRegistry::awReg& c, std::shared_ptr<AirwinConsolidatedBase> fx)
-      : plugin_class{c}
+      const AirwinRegistry::awReg& c, const std::vector<ParameterMetadata>& p,
+      std::shared_ptr<AirwinConsolidatedBase> fx)
+      : airwindows_node_base{c, p}
       , m_fx{std::move(fx)}
   {
-    m_inlets.push_back(new ossia::audio_inlet);
-    m_outlets.push_back(new ossia::audio_outlet);
   }
 
   ~airwindows_node_stereo() { }
-
-  auto add_control_inlet()
-  {
-    auto inlet = new ossia::value_inlet;
-    (*inlet)->domain = ossia::domain_base<float>{0.f, 1.f};
-    (*inlet)->type = ossia::val_type::FLOAT;
-    m_inlets.push_back(inlet);
-    return inlet;
-  }
 
   void run(const ossia::token_request& t, ossia::exec_state_facade e) noexcept override
   {
@@ -273,8 +271,9 @@ public:
       {
         if(!port->get_data().empty())
         {
-          float val = ossia::convert<float>(port->get_data().back().value);
-          m_fx->setParameter(i - 1, val); // -1 because first inlet is audio
+          // -1 because the first inlet is audio
+          const double val = ossia::convert<double>(port->get_data().back().value);
+          m_fx->setParameter((int)i - 1, to_normalized((int)i - 1, val));
         }
       }
     }
@@ -350,97 +349,53 @@ Component::Component(
   if(!proc.reg)
     return;
 
-  // Create the airwindows effect
-  auto fx_ptr = proc.fx;
-  if(!fx_ptr)
-    return;
-
   const auto sr = ctx.execState->sampleRate;
   const bool monophonic = proc.flags() & Process::ProcessFlags::PolyphonySupported;
+  const auto& params = proc.parameters();
 
+  // We always build fresh effects: airwindows plug-ins cannot reset their internal
+  // state, so reusing one would let e.g. delay and reverb trails survive a
+  // stop / play sequence.
+  std::shared_ptr<airwindows_node_base> node;
   if(monophonic)
   {
-    // Create the node with the effect
-    auto node
-        = ossia::make_node<airwindows_node_polyphonic>(*ctx.execState, *proc.reg, sr);
-
-    // Add control inlets for each parameter
-    const auto& inls = proc.inlets();
-    int idx = 0;
-    auto it = inls.begin();
-    ++it;
-    ++idx;
-    auto weak_node = std::weak_ptr{node};
-    for(; it != inls.end(); ++it)
-    {
-      auto model_inlet = qobject_cast<const Process::ControlInlet*>(*it);
-      SCORE_ASSERT(model_inlet);
-      auto exec_inlet = node->add_control_inlet();
-      exec_inlet->data.write_value(ossia::convert<float>(model_inlet->value()), 0);
-
-      connect(
-          model_inlet, &Process::ControlInlet::valueChanged, this,
-          [idx, weak_node, exec_inlet](const ossia::value& v) {
-        if(auto n = weak_node.lock())
-        {
-          SCORE_ASSERT(n->root_inputs().size() > idx);
-          exec_inlet->data.write_value(v, 0);
-        }
-      });
-
-      idx++;
-    }
-    this->node = node;
-
-    // Connect the ports
-    m_ossia_process = std::make_shared<ossia::node_process>(node);
+    node = ossia::make_node<airwindows_node_polyphonic>(
+        *ctx.execState, *proc.reg, params, sr);
   }
   else
   {
-    // Create the node with the effect. We recreate a new one even there because airwindows plug-in
-    // do not allow to reset their internal state, leading to e.g. delays and reverb trails surviving a
-    // stop / play sequence.
     auto fx_ptr = proc.reg->generator();
     if(!fx_ptr)
       return;
     fx_ptr->setSampleRate(sr);
 
-    auto node = ossia::make_node<airwindows_node_stereo>(
-        *ctx.execState, *proc.reg, std::move(fx_ptr));
-    auto& fx = *node->m_fx;
-
-    // Add control inlets for each parameter
-    const auto& inls = proc.inlets();
-    int idx = 0;
-    auto it = inls.begin();
-    ++it;
-    ++idx;
-    auto weak_node = std::weak_ptr{node};
-    for(; it != inls.end(); ++it)
-    {
-      auto model_inlet = qobject_cast<const Process::ControlInlet*>(*it);
-      SCORE_ASSERT(model_inlet);
-      auto exec_inlet = node->add_control_inlet();
-      fx.setParameter(idx - 1, ossia::convert<float>(model_inlet->value()));
-
-      connect(
-          model_inlet, &Process::ControlInlet::valueChanged, this,
-          [idx, weak_node, exec_inlet](const ossia::value& v) {
-        if(auto n = weak_node.lock())
-        {
-          SCORE_ASSERT(n->root_inputs().size() > idx);
-          exec_inlet->data.write_value(v, 0);
-        }
-      });
-
-      idx++;
-    }
-
-    this->node = node;
-
-    // Connect the ports
-    m_ossia_process = std::make_shared<ossia::node_process>(node);
+    node = ossia::make_node<airwindows_node_stereo>(
+        *ctx.execState, *proc.reg, params, std::move(fx_ptr));
   }
+
+  // Add a control inlet per parameter. The port carries display units; the node
+  // normalizes them on the audio thread.
+  const auto& inls = proc.inlets();
+  auto weak_node = std::weak_ptr{node};
+  for(auto it = std::next(inls.begin()); it != inls.end(); ++it)
+  {
+    auto model_inlet = qobject_cast<Process::ControlInlet*>(*it);
+    SCORE_ASSERT(model_inlet);
+
+    auto exec_inlet = node->add_control_inlet();
+    model_inlet->setupExecution(*exec_inlet, this);
+    exec_inlet->data.write_value(model_inlet->value(), 0);
+
+    connect(
+        model_inlet, &Process::ControlInlet::valueChanged, this,
+        [weak_node, exec_inlet](const ossia::value& v) {
+      if(auto n = weak_node.lock())
+        exec_inlet->data.write_value(v, 0);
+    });
+  }
+
+  this->node = node;
+  m_ossia_process = std::make_shared<ossia::node_process>(node);
 }
 
 Component::~Component() { }

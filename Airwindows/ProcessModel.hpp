@@ -1,19 +1,17 @@
 #pragma once
-#include <Process/Dataflow/WidgetInlets.hpp>
 #include <Process/Process.hpp>
 
-#include <Control/DefaultEffectItem.hpp>
-#include <Effect/EffectFactory.hpp>
-
-#include <score/widgets/PluginWindow.hpp>
-
+#include <Airwindows/Metadata.hpp>
 #include <Airwindows/ProcessMetadata.hpp>
 
 #include <AirwinRegistry.h>
-#include <airwin_consolidated_base.h>
 
-#include <memory>
 #include <verdigris>
+
+namespace Process
+{
+struct ControlInlet;
+}
 
 namespace Airwindows
 {
@@ -31,6 +29,17 @@ class ProcessModel final : public Process::ProcessModel
   friend class JSONWriter;
 
 public:
+  /**
+   * @brief Serialization format of this process.
+   *
+   * 1: one FloatSlider per parameter, domain [0;1], value = the raw normalized
+   *    parameter the effect consumes. Written by builds before this existed, and
+   *    therefore *not* recorded in the file - an absent "Version" means 1.
+   * 2: controls carry the parameter's real range - see Airwindows::ParameterMetadata.
+   *    Values are in display units and the executor normalizes them.
+   */
+  static constexpr int formatVersion = 2;
+
   explicit ProcessModel(
       const TimeVal& duration, const QString& data, const Id<Process::ProcessModel>& id,
       QObject* parent);
@@ -41,6 +50,7 @@ public:
   {
     vis.writeTo(*this);
     init();
+    migrateControls();
   }
 
   ~ProcessModel() override;
@@ -60,34 +70,45 @@ public:
   }
   Process::ProcessFlags flags() const noexcept override;
 
-  void setPluginName(const QString& name);
   const QString& pluginName() const noexcept { return m_pluginName; }
 
-  // Control management
-  void on_addControl(int idx, float v);
-  void removeControl(const Id<Process::Port>&);
-  void removeControl(int fxnum);
-  
-  // Get parameter info from the effect
-  QString getParameterName(int index) const;
-  int getParameterCount() const;
-
-  std::unique_ptr<Process::Inlet> audio_in;
-  std::unique_ptr<Process::Outlet> audio_out;
-
-  ossia::hash_map<int, Process::FloatSlider*> controls;
-
-  // Signals
-  void controlAdded(const Process::Port& p) W_SIGNAL(controlAdded, p);
-  void controlRemoved(const Process::Port& p) W_SIGNAL(controlRemoved, p);
+  /**
+   * @brief Derived per-parameter metadata; empty if the plug-in could not be found.
+   *
+   * Probes the effect on the first call for a given plug-in - not cheap, and not
+   * callable from the audio thread. The executor takes this reference once at setup.
+   */
+  const std::vector<ParameterMetadata>& parameters() const;
 
   AirwinRegistry::awReg* reg{};
-  std::shared_ptr<AirwinConsolidatedBase> fx;
 
 private:
   QString m_pluginName;
   int m_pluginIndex{-1};
+
+  //! Format the loaded document was written by; see @c formatVersion.
+  int m_loadedVersion{formatVersion};
+
   void init();
+
+  //! Build one control per parameter, at the effect's own default value.
+  void createControls();
+
+  //! Append a control for @p idx, whose value is given normalized.
+  void addControl(int idx, float normalized);
+
+  /**
+   * @brief Bring deserialized controls in line with the current metadata.
+   *
+   * Idempotent: a control that already exposes what the metadata describes is left
+   * untouched. Anything else is rebuilt - and only a control that still looks like
+   * format 1 has its value reinterpreted as normalized. A format-2 value is in
+   * display units and stays that way, however far the metadata has since moved.
+   */
+  void migrateControls();
+
+  Process::ControlInlet*
+  makeControl(const ParameterMetadata& meta, Id<Process::Port> id, double displayValue);
 };
 
 }
