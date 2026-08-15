@@ -31,41 +31,44 @@ class LibraryHandler final
 {
   SCORE_CONCRETE("5aff3580-21d3-4069-bd08-823371245a5b")
 public:
-  Library::ProcessNode* node{};
-  ossia::hash_map<std::string, Library::ProcessNode*> categories;
-
   void setup(Library::ProcessesItemModel& model, const score::GUIApplicationContext& ctx)
       override
   {
     const auto& key = Metadata<ConcreteKey_k, Airwindows::ProcessModel>::get();
-    QModelIndex node = model.find(key);
-    if(node == QModelIndex{})
-      return;
-    auto& parent = *reinterpret_cast<Library::ProcessNode*>(node.internalPointer());
-    parent.key = {};
-    this->node = &parent;
 
     // Initialize the airwindows registry
     initializeRegistry();
 
+    // Stage the whole registry; the model owns tree mutation and signals.
+    ossia::hash_map<std::string, std::size_t> categories;
+    std::vector<Library::StagedNode> staged;
+    staged.reserve(AirwinRegistry::categories.size());
     for(const auto& cat : AirwinRegistry::categories)
     {
-      auto& category = Library::addToLibrary(
-          parent, Library::ProcessData{{{}, QString::fromStdString(cat), {}}, {}});
-      categories[cat] = &category;
+      categories[cat] = staged.size();
+      staged.push_back(
+          Library::StagedNode{{{{}, QString::fromStdString(cat), {}}, {}}, {}});
     }
-    // Add all airwindows plugins from the registry
     for(const auto& plugin : AirwinRegistry::registry)
     {
-      Library::ProcessData pdata{
-          {key, QString::fromStdString(plugin.name),
-           QString::fromStdString(plugin.name)},
+      Library::StagedNode p{
+          {{key, QString::fromStdString(plugin.name),
+            QString::fromStdString(plugin.name)},
+           {}},
           {}};
       if(auto it = categories.find(plugin.category); it != categories.end())
-        Library::addToLibrary(*it->second, std::move(pdata));
+        staged[it->second].children.push_back(std::move(p));
       else
-        Library::addToLibrary(parent, std::move(pdata));
+        staged.push_back(std::move(p));
     }
+    std::sort(staged.begin(), staged.end(), [](const auto& lhs, const auto& rhs) {
+      return QString::compare(
+                 lhs.data.prettyName, rhs.data.prettyName, Qt::CaseInsensitive)
+             < 0;
+    });
+
+    model.clearAnchorKey(key);
+    model.replaceChildren(key, std::move(staged));
   }
 };
 
