@@ -13,6 +13,7 @@
 
 #include <Airwindows/Executor/Component.hpp>
 #include <Airwindows/Library.hpp>
+#include <Airwindows/Registry.hpp>
 #include <Airwindows/ProcessFactory.hpp>
 
 #include <AirwinRegistry.h>
