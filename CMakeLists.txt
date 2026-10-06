@@ -138,6 +138,18 @@ target_link_libraries(
     score_addon_airwindows_core
 )
 
+if(COMMAND score_register_license)
+  # The plug-in sources are airwin2rack's copies: the airwindows submodule
+  # itself is only checked out when regenerating them.
+  set(_aw_license "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/libs/airwindows/LICENSE")
+  if(EXISTS "${_aw_license}")
+    score_register_license(Airwindows URL "https://www.airwindows.com" FILES "${_aw_license}")
+  else()
+    score_register_license(Airwindows URL "https://www.airwindows.com" HEADER "MIT License")
+  endif()
+  score_register_license(airwin2rack URL "https://github.com/baconpaul/airwin2rack" FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/LICENSE.md")
+endif()
+
 setup_score_plugin(${PROJECT_NAME})
 
 if(SCORE_TESTING AND COMMAND score_add_test)
