@@ -12,7 +12,7 @@ endif()
 
 score_common_setup()
 
-file(GLOB airwindows_srcs  
+file(GLOB airwindows_srcs CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/autogen_airwin/*.cpp"
 )
@@ -38,22 +38,22 @@ set(SRCS
 # The per-effect documentation, embedded as a resource: AirwinRegistry.cpp reads it.
 include(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/cmake/CmakeRC.cmake)
 cmrc_add_resource_library(awdoc_resources ALIAS awdoc::rc NAMESPACE awdoc_resources)
-file(GLOB DOC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/*.txt")
+file(GLOB DOC_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/*.txt")
 cmrc_add_resources(awdoc_resources
     WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack"
     ${DOC_FILES}
 )
 
-# The airwindows effects themselves: 1459 files imported verbatim. Their own target
-# so that the warning suppression and the DSP optimisation flags they need stay off
-# every line of code we actually wrote.
+# The airwindows effects are imported verbatim from airwin2rack. Their own target
+# keeps warning suppression and DSP optimisation flags off our integration code.
+# CONFIGURE_DEPENDS above picks up added effects when the submodule is updated.
 add_library(airwindows_dsp STATIC ${airwindows_srcs})
 
 target_include_directories(airwindows_dsp
   PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src"
   PRIVATE
-    # 486 headers named Point.h, curve.h, Chorus.h... - kept off every other target
+    # Generic names such as Point.h, curve.h, Chorus.h stay off every other target.
     "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/airwin2rack/src/autogen_airwin"
 )
 
