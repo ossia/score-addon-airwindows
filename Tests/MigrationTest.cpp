@@ -479,6 +479,33 @@ TEST_CASE(
   CHECK(valueOf(boost) == Approx(12.5).margin(1e-2));
 }
 
+TEST_CASE(
+    "A parameter renamed upstream takes its new name and keeps its value",
+    "[airwindows][model][serialization]")
+{
+  QObject owner;
+  auto& proc = *makeProcess("ADClip7", owner);
+
+  // A format 2 document whose Boost port was written under another name, with the
+  // same widget and range as today.
+  auto doc = toJson(proc);
+  {
+    QObject scratch;
+    auto& port = *new Process::FloatSlider{
+        0.f, 18.f, 12.5f, "Gain (dB)", proc.inlets()[1]->id(), &scratch};
+    port.setExposed("boost");
+    spliceInlet(doc, 1, port);
+  }
+
+  auto& loaded = *fromJson(doc, owner);
+  const auto& boost = *loaded.inlets()[1];
+  CHECK(boost.id() == proc.inlets()[1]->id());
+  CHECK(boost.name() == proc.inlets()[1]->name());
+  CHECK(boost.exposed() == "boost");
+  CHECK(valueOf(boost) == Approx(12.5).margin(1e-3));
+  CHECK(maxOf(boost) == Approx(18.).margin(1e-3));
+}
+
 TEST_CASE("Conversion is idempotent", "[airwindows][model][serialization]")
 {
   QObject owner;

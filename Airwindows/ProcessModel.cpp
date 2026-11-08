@@ -53,6 +53,11 @@ bool matchesMetadata(
   if(inlet.concreteKey() != expectedControlKey(meta))
     return false;
 
+  // Upstream can repurpose a parameter under a new name at the same index and with
+  // the same range; the port then has to show what the effect now calls it.
+  if(inlet.name() != meta.displayName())
+    return false;
+
   if(meta.kind == ParameterKind::Enum)
   {
     // By label, not by count: upstream renaming or reordering two choices while
