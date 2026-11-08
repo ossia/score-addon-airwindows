@@ -15,7 +15,10 @@
 #include <AirwinRegistry.h>
 #include <cmath>
 
+#include <cstdlib>
 #include <limits>
+#include <string>
+#include <vector>
 
 using Catch::Approx;
 using namespace Airwindows;
@@ -145,6 +148,47 @@ TEST_CASE("Integer parameters keep their integral range", "[airwindows][metadata
   CHECK(shift.toDisplay(1.) == Approx(16.));
 }
 
+TEST_CASE(
+    "Dense predelay values reach the effect without losing steps",
+    "[airwindows][metadata]")
+{
+  const auto& params = metadataFor("Ultralight2");
+  REQUIRE(params.size() > 3);
+  const auto& predelay = params[3];
+  CHECK(predelay.min == Approx(0.));
+  CHECK(predelay.max == Approx(998.));
+
+  auto fx = AirwinRegistry::registry[AirwinRegistry::nameToIndex.at("Ultralight2")]
+                .generator();
+  REQUIRE(fx);
+  // More choices than the small-step classifier retains. Regardless of whether
+  // metadata uses a formula or a sampled curve, every displayed integer must
+  // select that exact predelay in the DSP, including both endpoints.
+  for(int delay = 0; delay <= 998; ++delay)
+  {
+    CAPTURE(delay);
+    const double normalized = predelay.toNormalized(delay);
+    CHECK(normalized >= 0.);
+    CHECK(normalized <= 1.);
+    CHECK(predelay.toDisplay(normalized) == Approx(delay).margin(1e-6));
+    fx->setParameter(3, static_cast<float>(normalized));
+    char display[2 * kVstMaxParamStrLen]{};
+    fx->getParameterDisplay(3, display);
+    CHECK(std::strtod(display, nullptr) == delay);
+  }
+
+  // Interpolated display readings may lie between integer steps, but must stay
+  // within one step of the value actually shown by the effect.
+  for(float normalized : {0.001f, 0.123f, 0.5f, 0.777f, 0.999f})
+  {
+    CAPTURE(normalized);
+    fx->setParameter(3, normalized);
+    char display[2 * kVstMaxParamStrLen]{};
+    fx->getParameterDisplay(3, display);
+    CHECK(std::abs(predelay.toDisplay(normalized) - std::strtod(display, nullptr)) < 1.);
+  }
+}
+
 TEST_CASE("Non-affine parameters get a closed-form fit", "[airwindows][metadata]")
 {
   // Compresaturator's Expand is float2string(C*C*5000): quadratic, so neither an
@@ -222,7 +266,8 @@ TEST_CASE("Both mappings are total", "[airwindows][metadata]")
   const auto quiet_nan = std::numeric_limits<double>::quiet_NaN();
   const auto inf = std::numeric_limits<double>::infinity();
 
-  for(const char* effect : {"ADClip7", "BitShiftGain", "Compresaturator", "Fracture"})
+  for(const char* effect :
+      {"ADClip7", "BitShiftGain", "Compresaturator", "Fracture", "Ultralight2"})
   {
     const auto& params = metadataFor(effect);
     REQUIRE(!params.empty());
@@ -261,7 +306,8 @@ TEST_CASE("Every parameter of every effect maps consistently", "[airwindows][met
   const int count = (int)AirwinRegistry::registry.size();
   REQUIRE(count > 100);
 
-  int mapped = 0, total = 0, tables = 0;
+  int mapped = 0, total = 0;
+  std::vector<std::string> tables;
   for(int p = 0; p < count; p++)
   {
     const auto& reg = AirwinRegistry::registry[p];
@@ -279,7 +325,7 @@ TEST_CASE("Every parameter of every effect maps consistently", "[airwindows][met
       if(m.kind != ParameterKind::Normalized)
         mapped++;
       if(!m.curve.empty())
-        tables++;
+        tables.push_back(reg.name + ":" + std::to_string(i));
 
       CHECK(!m.name.isEmpty());
       CHECK(m.min <= m.max);
@@ -310,8 +356,10 @@ TEST_CASE("Every parameter of every effect maps consistently", "[airwindows][met
   }
 
   CHECK(total > 1000);
-  // Every parameter is a closed form today; the sampled table is a safety net only.
-  CHECK(tables == 0);
+  // The sampled table is a fallback for displays no closed form fits. Ultralight2's
+  // predelay prints 999 integers, more than the step classifier keeps. Any other
+  // parameter landing here means an upstream display the inference no longer reads.
+  CHECK(tables == std::vector<std::string>{"Ultralight2:3"});
   // As of the current airwin2rack revision every single parameter can be mapped.
   // A new effect upstream whose display code we cannot read would trip this - so
   // would a regression in the inference itself, which is the point.
