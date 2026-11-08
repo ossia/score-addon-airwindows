@@ -7,6 +7,8 @@
 // whose display code is known, and then assert the mapping invariants over the whole
 // registry.
 
+#include <ossia/math/safe_math.hpp>
+
 #include <Airwindows/Metadata.hpp>
 #include <Airwindows/Registry.hpp>
 #include <catch2/catch_approx.hpp>
@@ -276,10 +278,10 @@ TEST_CASE("Both mappings are total", "[airwindows][metadata]")
       INFO("effect: " << effect << " parameter: " << m.name.toStdString());
       for(double bad : {quiet_nan, inf, -inf})
       {
-        CHECK(std::isfinite(m.toNormalized(bad)));
+        CHECK(ossia::safe_isfinite(m.toNormalized(bad)));
         CHECK(m.toNormalized(bad) >= 0.);
         CHECK(m.toNormalized(bad) <= 1.);
-        CHECK(std::isfinite(m.toDisplay(bad)));
+        CHECK(ossia::safe_isfinite(m.toDisplay(bad)));
       }
     }
   }

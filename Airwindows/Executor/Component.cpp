@@ -72,8 +72,7 @@ public:
   {
     if(parameter_i >= 0 && parameter_i < std::ssize(params))
       return (float)params[parameter_i].toNormalized(display);
-    const bool finite = !ossia::safe_isnan(display) && !ossia::safe_isinf(display);
-    return finite ? (float)std::clamp(display, 0., 1.) : 0.f;
+    return ossia::safe_isfinite(display) ? (float)std::clamp(display, 0., 1.) : 0.f;
   }
 };
 
