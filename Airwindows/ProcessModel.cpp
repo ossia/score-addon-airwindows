@@ -123,16 +123,27 @@ double remapDisplayValue(
   return std::clamp(stored, meta.min, meta.max);
 }
 
-//! Everything a port carries that is the user's, not ours. Mirrors copy_port().
-void carryOverPortState(const Process::ControlInlet& from, Process::ControlInlet& to)
+/**
+ * @brief Everything a port carries that is the user's, not ours.
+ *
+ * What score's copy_port() carries, except the name, which comes from the metadata.
+ * The published name is kept even when the name changes, so that OSC bindings and
+ * scripts addressing the control under score:/controls still reach it.
+ */
+void carryOverPortState(Process::ControlInlet&& from, Process::ControlInlet& to)
 {
   to.displayHandledExplicitly = from.displayHandledExplicitly;
+  to.singleCable = from.singleCable;
   to.setAddress(from.address());
   to.setExposed(from.exposed());
+  to.setScriptable(from.scriptable());
   to.setDescription(from.description());
 
-  // Cables are not stored on the port; the document re-attaches them by path after
-  // loading, which finds the new port because it keeps the old one's id.
+  // A document file stores its cables beside the processes, not on the ports: it
+  // attaches them by port path once everything is loaded, and the path finds the
+  // new port because it keeps the old one's id. A port can still hold cables when
+  // it is restored from Port::saveData(), which does include them.
+  to.takeCables(std::move(from));
 }
 }
 
@@ -302,7 +313,7 @@ void ProcessModel::migrateControls()
                                   : remapDisplayValue(*inlet, m, stored);
 
     auto ctrl = makeControl(m, inlet->id(), display);
-    carryOverPortState(*inlet, *ctrl);
+    carryOverPortState(std::move(*inlet), *ctrl);
 
     m_inlets[i] = ctrl;
     delete inlet;
