@@ -18,6 +18,7 @@
 
 #include <score/application/ApplicationContext.hpp>
 #include <score/model/EntitySerialization.hpp>
+#include <score/model/path/ObjectPath.hpp>
 #include <score/model/path/PathSerialization.hpp>
 #include <score/plugins/SerializableHelpers.hpp>
 #include <score/plugins/settingsdelegate/SettingsDelegateModel.hpp>
@@ -184,6 +185,33 @@ double minOf(const Process::Port& p)
 double maxOf(const Process::Port& p)
 {
   return safe_cast<const Process::ControlInlet&>(p).domain().get().convert_max<double>();
+}
+
+//! What the document does with a saved cable end: walk the path down from the root.
+//! The first fragment of a path made by pathBetweenObjects() is the root itself.
+const QObject* resolve(const QObject& root, const ObjectPath& path)
+{
+  const QObject* obj = &root;
+  const auto& fragments = path.vec();
+  for(std::size_t f = 1; f < fragments.size(); f++)
+  {
+    const auto& fragment = fragments[f];
+    const QObject* next = nullptr;
+    for(const QObject* child : obj->children())
+    {
+      auto identified = qobject_cast<const IdentifiedObjectAbstract*>(child);
+      if(identified && child->objectName() == fragment.objectName()
+         && identified->id_val() == fragment.id())
+      {
+        next = child;
+        break;
+      }
+    }
+    if(!next)
+      return nullptr;
+    obj = next;
+  }
+  return obj;
 }
 
 void checkPortIdentity(const Process::Port& loaded, const Process::Port& original)
@@ -484,27 +512,51 @@ TEST_CASE(
     "A parameter renamed upstream takes its new name and keeps its value",
     "[airwindows][model][serialization]")
 {
-  QObject owner;
-  auto& proc = *makeProcess("ADClip7", owner);
+  QObject savedOwner;
+  auto& proc = *makeProcess("ADClip7", savedOwner);
+  const auto& current = *proc.inlets()[1];
 
   // A format 2 document whose Boost port was written under another name, with the
-  // same widget and range as today.
+  // same widget and range as today, and decorated by the user.
+  QString oldExposed;
   auto doc = toJson(proc);
   {
     QObject scratch;
-    auto& port = *new Process::FloatSlider{
-        0.f, 18.f, 12.5f, "Gain (dB)", proc.inlets()[1]->id(), &scratch};
+    auto& port = *new Process::FloatSlider{0.f,         18.f,         12.5f,
+                                           "Gain (dB)", current.id(), &scratch};
     port.setExposed("boost");
+    port.setScriptable(true);
+    port.setDescription("drives the clipper");
     spliceInlet(doc, 1, port);
+
+    // Published under the name it had then, as score does by default: scripts and
+    // OSC bindings keep addressing it that way after the rename.
+    auto& older = *new Process::FloatSlider{
+        (float)minOf(*proc.inlets()[2]), (float)maxOf(*proc.inlets()[2]),
+        (float)minOf(*proc.inlets()[2]), "Old name",
+        proc.inlets()[2]->id(),          &scratch};
+    oldExposed = older.exposed();
+    spliceInlet(doc, 2, older);
   }
 
-  auto& loaded = *fromJson(doc, owner);
+  // The document stores a cable to Boost as a path from the document root, saved
+  // against the port as it was, and resolves it after the processes are loaded.
+  const auto cableSink = ObjectPath::pathBetweenObjects(&savedOwner, &current);
+
+  QObject loadedOwner;
+  auto& loaded = *fromJson(doc, loadedOwner);
   const auto& boost = *loaded.inlets()[1];
-  CHECK(boost.id() == proc.inlets()[1]->id());
-  CHECK(boost.name() == proc.inlets()[1]->name());
+  CHECK(boost.name() == current.name());
   CHECK(boost.exposed() == "boost");
+  CHECK(boost.scriptable());
+  CHECK(boost.description() == "drives the clipper");
   CHECK(valueOf(boost) == Approx(12.5).margin(1e-3));
   CHECK(maxOf(boost) == Approx(18.).margin(1e-3));
+  CHECK(resolve(loadedOwner, cableSink) == &boost);
+
+  const auto& renamed = *loaded.inlets()[2];
+  CHECK(renamed.name() == proc.inlets()[2]->name());
+  CHECK(renamed.exposed() == oldExposed);
 }
 
 TEST_CASE("Conversion is idempotent", "[airwindows][model][serialization]")
