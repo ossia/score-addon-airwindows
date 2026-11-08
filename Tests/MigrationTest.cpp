@@ -1,5 +1,5 @@
-// Airwindows process controls: construction from the derived metadata, and the
-// conversion of documents written by format 1.
+// Airwindows process controls: construction from the derived metadata, registry-wide
+// saved-session round-trips, and conversion of documents written by format 1.
 //
 // Format 1 gave every parameter a FloatSlider over [0;1] holding the raw normalized
 // value. Format 2 gives it the widget and the range the metadata describes, with the
@@ -35,8 +35,13 @@
 
 #include <Airwindows/Metadata.hpp>
 #include <Airwindows/ProcessModel.hpp>
+#include <Airwindows/Registry.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <cmath>
+
+#include <algorithm>
 
 using Catch::Approx;
 
@@ -179,6 +184,32 @@ double maxOf(const Process::Port& p)
 {
   return safe_cast<const Process::ControlInlet&>(p).domain().get().convert_max<double>();
 }
+
+void checkPortIdentity(const Process::Port& loaded, const Process::Port& original)
+{
+  CHECK(loaded.id() == original.id());
+  CHECK(loaded.concreteKey() == original.concreteKey());
+}
+
+void checkControlState(
+    const Process::ControlInlet& loaded, const Process::ControlInlet& original)
+{
+  // Keep the ossia value type as well as its number: an integer choice must not
+  // turn into a float when a session is loaded.
+  CHECK(loaded.value().get_type() == original.value().get_type());
+  CHECK(loaded.value() == original.value());
+  if(auto* box = qobject_cast<const Process::ComboBox*>(&original))
+  {
+    auto* loadedBox = qobject_cast<const Process::ComboBox*>(&loaded);
+    REQUIRE(loadedBox);
+    CHECK(loadedBox->alternatives == box->alternatives);
+  }
+  else
+  {
+    CHECK(minOf(loaded) == minOf(original));
+    CHECK(maxOf(loaded) == maxOf(original));
+  }
+}
 }
 
 TEST_CASE("Controls are built from the derived metadata", "[airwindows][model]")
@@ -225,29 +256,105 @@ TEST_CASE("Integer parameters get an int slider", "[airwindows][model]")
 }
 
 TEST_CASE(
-    "A current document round-trips unchanged", "[airwindows][model][serialization]")
+    "Every registered effect preserves its controls in saved sessions",
+    "[airwindows][model][serialization]")
 {
-  QObject owner;
-  auto& proc = *makeProcess("ADClip7", owner);
+  Airwindows::initializeRegistry();
+  REQUIRE(!AirwinRegistry::registry.empty());
 
-  safe_cast<Process::ControlInlet*>(proc.inlets()[1])->setValue(12.5f);
-  safe_cast<Process::ControlInlet*>(proc.inlets()[4])->setValue(1);
-
-  for(auto* loaded : {fromJson(toJson(proc), owner), dataStreamRoundTrip(proc, owner)})
+  for(const auto& effect : AirwinRegistry::registry)
   {
-    CHECK(loaded->pluginName() == "ADClip7");
-    REQUIRE(loaded->inlets().size() == proc.inlets().size());
+    INFO("effect " << effect.name);
+    QObject owner;
+    auto& proc = *makeProcess(effect.name.c_str(), owner);
+    REQUIRE(proc.reg == &effect);
+    REQUIRE(proc.parameters().size() == static_cast<std::size_t>(effect.nParams));
+    REQUIRE(proc.inlets().size() == proc.parameters().size() + 1);
+    REQUIRE(proc.outlets().size() == 1);
+    REQUIRE(qobject_cast<Process::AudioInlet*>(proc.inlets()[0]));
+    REQUIRE(qobject_cast<Process::AudioOutlet*>(proc.outlets()[0]));
+
+    std::vector<float> normalized;
+    normalized.reserve(proc.parameters().size());
+    for(std::size_t i = 0; i < proc.parameters().size(); i++)
+    {
+      INFO("parameter " << i);
+      auto* control = qobject_cast<Process::ControlInlet*>(proc.inlets()[i + 1]);
+      REQUIRE(control);
+      const auto& meta = proc.parameters()[i];
+      const auto initial = control->value();
+      ossia::value chosen;
+      float raw{};
+      // Prefer interior values; endpoints also reach narrow discrete plateaus.
+      // A constant parameter has no nondefault value to exercise.
+      for(float candidate : {0.23f, 0.77f, 0.f, 1.f})
+      {
+        raw = candidate;
+        const double display = std::clamp(meta.toDisplay(candidate), meta.min, meta.max);
+        REQUIRE(std::isfinite(display));
+        if(meta.kind == Airwindows::ParameterKind::Enum
+           || meta.kind == Airwindows::ParameterKind::Integer)
+          chosen = static_cast<int>(std::llround(display));
+        else
+          chosen = static_cast<float>(display);
+        if(chosen != initial)
+          break;
+      }
+      REQUIRE((meta.min == meta.max || chosen != initial));
+      control->setValue(chosen);
+      REQUIRE(control->value() == chosen);
+      normalized.push_back(raw);
+    }
+
+    for(bool binary : {false, true})
+    {
+      INFO("format " << (binary ? "binary" : "JSON"));
+      auto* loaded
+          = binary ? dataStreamRoundTrip(proc, owner) : fromJson(toJson(proc), owner);
+      CHECK(loaded->pluginName() == proc.pluginName());
+      CHECK(loaded->reg == proc.reg);
+      REQUIRE(loaded->inlets().size() == proc.inlets().size());
+      REQUIRE(loaded->outlets().size() == proc.outlets().size());
+      for(std::size_t i = 0; i < proc.inlets().size(); i++)
+      {
+        INFO("inlet " << i);
+        checkPortIdentity(*loaded->inlets()[i], *proc.inlets()[i]);
+        CHECK(loaded->inlets()[i]->name() == proc.inlets()[i]->name());
+        if(i > 0)
+        {
+          auto* control = qobject_cast<Process::ControlInlet*>(loaded->inlets()[i]);
+          REQUIRE(control);
+          checkControlState(
+              *control, safe_cast<const Process::ControlInlet&>(*proc.inlets()[i]));
+        }
+      }
+      for(std::size_t i = 0; i < proc.outlets().size(); i++)
+      {
+        INFO("outlet " << i);
+        checkPortIdentity(*loaded->outlets()[i], *proc.outlets()[i]);
+        CHECK(loaded->outlets()[i]->name() == proc.outlets()[i]->name());
+      }
+    }
+
+    // Format-1 conversion of every effect. Whether the metadata maps correctly is
+    // MetadataTest's job; here its display value must survive the load boundary.
+    INFO("format legacy JSON");
+    auto& migrated = *fromJson(makeLegacyDocument(proc, normalized), owner);
+    CHECK(migrated.pluginName() == proc.pluginName());
+    CHECK(migrated.reg == proc.reg);
+    REQUIRE(migrated.inlets().size() == proc.inlets().size());
     for(std::size_t i = 0; i < proc.inlets().size(); i++)
     {
       INFO("inlet " << i);
-      CHECK(loaded->inlets()[i]->id() == proc.inlets()[i]->id());
-      CHECK(loaded->inlets()[i]->concreteKey() == proc.inlets()[i]->concreteKey());
-      CHECK(loaded->inlets()[i]->name() == proc.inlets()[i]->name());
+      checkPortIdentity(*migrated.inlets()[i], *proc.inlets()[i]);
+      if(i > 0)
+      {
+        auto* control = qobject_cast<Process::ControlInlet*>(migrated.inlets()[i]);
+        REQUIRE(control);
+        checkControlState(
+            *control, safe_cast<const Process::ControlInlet&>(*proc.inlets()[i]));
+      }
     }
-    CHECK(valueOf(*loaded->inlets()[1]) == Approx(12.5));
-    CHECK(valueOf(*loaded->inlets()[4]) == Approx(1.));
-    CHECK(minOf(*loaded->inlets()[1]) == Approx(0.).margin(1e-3));
-    CHECK(maxOf(*loaded->inlets()[1]) == Approx(18.).margin(1e-3));
   }
 }
 
