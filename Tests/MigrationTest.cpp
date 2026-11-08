@@ -30,6 +30,7 @@
 #include <core/application/ApplicationSettings.hpp>
 #include <core/presenter/DocumentManager.hpp>
 
+#include <ossia/math/safe_math.hpp>
 #include <ossia/network/domain/domain.hpp>
 #include <ossia/network/value/value_conversion.hpp>
 
@@ -291,7 +292,7 @@ TEST_CASE(
       {
         raw = candidate;
         const double display = std::clamp(meta.toDisplay(candidate), meta.min, meta.max);
-        REQUIRE(std::isfinite(display));
+        REQUIRE(ossia::safe_isfinite(display));
         if(meta.kind == Airwindows::ParameterKind::Enum
            || meta.kind == Airwindows::ParameterKind::Integer)
           chosen = static_cast<int>(std::llround(display));

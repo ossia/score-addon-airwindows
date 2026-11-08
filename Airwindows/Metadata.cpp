@@ -25,7 +25,7 @@ namespace
 //! delete every guard below. ossia's version inspects the bits instead.
 bool isFinite(double v) noexcept
 {
-  return !ossia::safe_isnan(v) && !ossia::safe_isinf(v);
+  return ossia::safe_isfinite(v);
 }
 
 //! Odd, so that the middle of a plateau always lands on a sample.

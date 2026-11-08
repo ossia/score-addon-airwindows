@@ -138,8 +138,8 @@ TEST_CASE(
               auto& result = inPlace ? inputs[channel] : outputs[channel];
               const auto end = result.data() + frames;
               const auto nonfinite = std::find_if(result.data(), end, [](double value) {
-                // Unlike std::isfinite, these survive the host's fast-math flags.
-                return ossia::safe_isnan(value) || ossia::safe_isinf(value);
+                // Unlike std::isfinite, this survives the host's fast-math flags.
+                return !ossia::safe_isfinite(value);
               });
               const auto firstNonfiniteFrame = nonfinite - result.data();
               CAPTURE(firstNonfiniteFrame);
